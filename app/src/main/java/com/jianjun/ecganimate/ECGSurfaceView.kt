@@ -3,11 +3,13 @@ package com.jianjun.ecganimate
 import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
+import android.view.MotionEvent
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.core.graphics.withTranslation
 import kotlinx.coroutines.*
 import java.util.*
+import kotlin.math.abs
 import kotlin.random.Random
 
 class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
@@ -15,27 +17,34 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     private var surfaceHolder = holder
     private var surfaceCanvas: Canvas? = null
     private var drawingJob: Job? = null
-    private val X_OFFSET = 40f
-    private val Y_STANDARD = 60f
-    private var y_standard = 60f
-    private val X_TRANSIENT = 10f
+    private var yStandard = 60f
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val lineColor = Color.parseColor("#FF8581")
     private val lineWidth = 4f
-    private val COLOR_GRAPH_FILL = intArrayOf(Color.parseColor("#E08581"), Color.TRANSPARENT)
     private var transientX = 0f
-    private val pathMatrix = Matrix()
     private var lastXPos = 0f
     private var heartBeatWidth = 0f
-    private var linePathSize = 0f
     private val linePath = Path()
     private val gradientPath = Path()
     private val straightLinePath = Path()
     private val heartBeatPath = Path()
     private val gradientStraightLinePath = Path()
     private val gradientHeartBeatPath = Path()
+
+    private var isAnimateStart = false
+    private var refreshTime = DEFAULT_REFRESH_NANO_TIME
+
+    companion object {
+        private const val DEFAULT_REFRESH_NANO_TIME = 10000
+        private const val TOUCH_REFRESH_NANO_TIME = 1000
+        private val COLOR_GRAPH_FILL =
+            intArrayOf(Color.parseColor("#F2E08581"), Color.TRANSPARENT)
+        private const val SMOOTHNESS = 0.5f
+        private const val TRANSIENT_X_OVER = 30f
+        private const val X_TRANSIENT = 10f
+    }
 
     constructor(context: Context?) : this(context, null)
     constructor(context: Context?, attrs: AttributeSet?) : this(context, attrs, -1)
@@ -68,7 +77,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
         super.onLayout(changed, left, top, right, bottom)
-        y_standard = height / 2f
+        yStandard = height / 2f
         generateGradientPath()
         gradientPaint.shader =
             LinearGradient(
@@ -84,13 +93,13 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
 
     private fun generateGradientPath() {
         straightLinePath.reset()
-        straightLinePath.moveTo(0f, y_standard)
-        straightLinePath.lineTo(X_TRANSIENT, y_standard)
+        straightLinePath.moveTo(0f, yStandard)
+        straightLinePath.lineTo(X_TRANSIENT, yStandard)
         gradientStraightLinePath.reset()
         gradientStraightLinePath.addPath(straightLinePath)
         gradientStraightLinePath.lineTo(X_TRANSIENT, height.toFloat())
         gradientStraightLinePath.lineTo(0f, height.toFloat())
-        gradientStraightLinePath.lineTo(0f, y_standard)
+        gradientStraightLinePath.lineTo(0f, yStandard)
     }
 
     override fun surfaceChanged(holder: SurfaceHolder?, format: Int, width: Int, height: Int) {
@@ -103,11 +112,11 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     override fun surfaceCreated(holder: SurfaceHolder?) {
         drawingJob = CoroutineScope(Dispatchers.Default).launch {
             while (true) {
-                val start = System.currentTimeMillis()
+                val start = System.nanoTime()
                 shiftX()
                 draw()
-                val stop = System.currentTimeMillis() - start
-                if (stop < 100) {
+                val stop = System.nanoTime() - start
+                if (stop < refreshTime) {
                     delay(stop)
                 }
             }
@@ -134,26 +143,18 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     data class PointF(var x: Float, var y: Float)
 
     private fun shiftX() {
-//        if (controlPoints.isEmpty() || controlPoints.last().x < width) {
-//            return
-//        }
+        if (!isAnimateStart) {
+            return
+        }
         if (lastXPos < width) {
             addStraightLine()
             return
         }
-
         if (lastXPos + transientX < width) {
             addStraightLine()
         }
-
         startTransientX()
-
-//        points.forEach {
-//            it.x = it.x - X_OFFSET
-//        }
     }
-
-    private val SMOOTHNESS = 0.5f
 
     private fun calculateControlPoint(pointList: List<PointF>): ArrayList<PointF> {
         val controlPoints = ArrayList<PointF>()
@@ -196,7 +197,6 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     fun updateHeartRate(value: Int) {
-//        points.add(PointF(points.last().x + X_OFFSET, y_standard + (value - Y_STANDARD) * 10))
         CoroutineScope(Dispatchers.Default).launch {
             linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
             gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
@@ -258,5 +258,47 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         val point = PointF(x, y)
         this.add(point)
         return point
+    }
+
+    fun start() {
+        isAnimateStart = true
+    }
+
+    fun stop() {
+        isAnimateStart = false
+    }
+
+    private var dx = 0f
+    private var dy = 0f
+    override fun onTouchEvent(event: MotionEvent?): Boolean {
+        when (event?.action) {
+            MotionEvent.ACTION_UP -> {
+                if (abs(dx - event.x) < 5 && abs(dy - event.y) < 5 ) {
+                    performClick()
+                }
+                refreshTime = DEFAULT_REFRESH_NANO_TIME
+                if (transientX > 0f) {
+                    transientX = 0f
+                }
+                if (transientX + lastXPos < width) {
+                    transientX = width - lastXPos
+                }
+            }
+            MotionEvent.ACTION_DOWN -> {
+                dx = event.x
+                dy = event.y
+                refreshTime = TOUCH_REFRESH_NANO_TIME
+            }
+            MotionEvent.ACTION_MOVE -> {
+                if (!isAnimateStart && lastXPos >= width) {
+                    val moveX = transientX + event.x - dx
+                    dx = event.x
+                    if (moveX < TRANSIENT_X_OVER && lastXPos + moveX > width - TRANSIENT_X_OVER) {
+                        transientX = moveX
+                    }
+                }
+            }
+        }
+        return true
     }
 }
