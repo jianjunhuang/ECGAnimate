@@ -33,8 +33,8 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     private val gradientStraightLinePath = Path()
     private val gradientHeartBeatPath = Path()
 
-    private var isAnimateStart = false
-    private var isShow = false
+    var isAnimateStart = false
+    var isShow = false
     private var refreshTime = DEFAULT_REFRESH_NANO_TIME
 
     companion object {
