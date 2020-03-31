@@ -9,6 +9,7 @@ import android.view.SurfaceView
 import androidx.core.graphics.withTranslation
 import kotlinx.coroutines.*
 import java.util.*
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.random.Random
 
@@ -33,8 +34,9 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     private val gradientStraightLinePath = Path()
     private val gradientHeartBeatPath = Path()
 
-    var isAnimateStart = false
-    var isShow = false
+    var isAnimateStart: AtomicBoolean = AtomicBoolean(false)
+    var isShow: AtomicBoolean = AtomicBoolean(false)
+    private var isDestroy: AtomicBoolean = AtomicBoolean(false)
     private var refreshTime = DEFAULT_REFRESH_NANO_TIME
 
     companion object {
@@ -107,12 +109,14 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     override fun surfaceDestroyed(holder: SurfaceHolder?) {
+        isDestroy.set(true)
         drawingJob?.cancel()
     }
 
     override fun surfaceCreated(holder: SurfaceHolder?) {
+        isDestroy.set(false)
         drawingJob = CoroutineScope(Dispatchers.Default).launch {
-            while (true) {
+            while (!isDestroy.get()) {
                 val start = System.nanoTime()
                 shiftX()
                 draw()
@@ -129,7 +133,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
             //获得canvas对象
             surfaceCanvas = surfaceHolder.lockCanvas()
             surfaceCanvas?.drawColor(Color.BLACK)
-            if (isShow) {
+            if (isShow.get()) {
                 surfaceCanvas?.withTranslation(transientX, 0f) {
                     surfaceCanvas?.drawPath(linePath, linePaint)
                     surfaceCanvas?.drawPath(gradientPath, gradientPaint)
@@ -146,7 +150,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     data class PointF(var x: Float, var y: Float)
 
     private fun shiftX() {
-        if (!isAnimateStart) {
+        if (!isAnimateStart.get()) {
             return
         }
         if (lastXPos < width) {
@@ -199,7 +203,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         return controlPoints
     }
 
-    fun updateHeartRate(value: Int) {
+    fun updateHeartRate() {
         CoroutineScope(Dispatchers.Default).launch {
             linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
             gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
@@ -264,20 +268,20 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     fun goOn() {
-        isAnimateStart = true
+        isAnimateStart.set(true)
     }
 
     fun pause() {
-        isAnimateStart = false
+        isAnimateStart.set(false)
     }
 
     fun stop() {
-        isShow = false
+        isShow.set(false)
     }
 
     fun start() {
-        isAnimateStart = true
-        isShow = true
+        isAnimateStart.set(true)
+        isShow.set(true)
         transientX = 0f
         lastXPos = 0f
         linePath.reset()
@@ -306,7 +310,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
                 refreshTime = TOUCH_REFRESH_NANO_TIME
             }
             MotionEvent.ACTION_MOVE -> {
-                if (!isAnimateStart && lastXPos >= width) {
+                if (!isAnimateStart.get() && lastXPos >= width) {
                     val moveX = transientX + event.x - dx
                     dx = event.x
                     if (moveX < TRANSIENT_X_OVER && lastXPos + moveX > width - TRANSIENT_X_OVER) {
