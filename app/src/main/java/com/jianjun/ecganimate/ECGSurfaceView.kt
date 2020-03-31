@@ -34,6 +34,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     private val gradientHeartBeatPath = Path()
 
     private var isAnimateStart = false
+    private var isShow = false
     private var refreshTime = DEFAULT_REFRESH_NANO_TIME
 
     companion object {
@@ -128,9 +129,11 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
             //获得canvas对象
             surfaceCanvas = surfaceHolder.lockCanvas()
             surfaceCanvas?.drawColor(Color.BLACK)
-            surfaceCanvas?.withTranslation(transientX, 0f) {
-                surfaceCanvas?.drawPath(linePath, linePaint)
-                surfaceCanvas?.drawPath(gradientPath, gradientPaint)
+            if (isShow) {
+                surfaceCanvas?.withTranslation(transientX, 0f) {
+                    surfaceCanvas?.drawPath(linePath, linePaint)
+                    surfaceCanvas?.drawPath(gradientPath, gradientPaint)
+                }
             }
         } catch (e: Exception) {
         } finally {
@@ -260,12 +263,25 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         return point
     }
 
-    fun start() {
+    fun goOn() {
         isAnimateStart = true
     }
 
-    fun stop() {
+    fun pause() {
         isAnimateStart = false
+    }
+
+    fun stop() {
+        isShow = false
+    }
+
+    fun start() {
+        isAnimateStart = true
+        isShow = true
+        transientX = 0f
+        lastXPos = 0f
+        linePath.reset()
+        gradientPath.reset()
     }
 
     private var dx = 0f
@@ -273,7 +289,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     override fun onTouchEvent(event: MotionEvent?): Boolean {
         when (event?.action) {
             MotionEvent.ACTION_UP -> {
-                if (abs(dx - event.x) < 5 && abs(dy - event.y) < 5 ) {
+                if (abs(dx - event.x) < 5 && abs(dy - event.y) < 5) {
                     performClick()
                 }
                 refreshTime = DEFAULT_REFRESH_NANO_TIME
