@@ -9,7 +9,6 @@ import android.view.SurfaceView
 import androidx.core.graphics.withTranslation
 import kotlinx.coroutines.*
 import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.collections.ArrayList
 import kotlin.math.abs
 import java.util.*
@@ -355,6 +354,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
 
     fun updateDisplay(pulseList: List<Int>) {
         isDisplayState.set(true)
+        pause()
         pulseArrayList.clear()
         pulseArrayList.addAll(pulseList)
         for (tag in pulseArrayList) {

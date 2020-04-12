@@ -32,5 +32,8 @@ class MainActivity : AppCompatActivity() {
         findViewById<Button>(R.id.ecg_stop).setOnClickListener {
             surfaceEcg.stop()
         }
+        findViewById<Button>(R.id.display).setOnClickListener {
+            surfaceEcg.updateDisplay(surfaceEcg.pulseArrayList)
+        }
     }
 }
