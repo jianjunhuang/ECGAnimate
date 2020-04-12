@@ -8,6 +8,10 @@ import android.view.SurfaceHolder
 import android.view.SurfaceView
 import androidx.core.graphics.withTranslation
 import kotlinx.coroutines.*
+import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicBoolean
+import kotlin.collections.ArrayList
+import kotlin.math.abs
 import java.util.*
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
@@ -22,6 +26,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
 
     private val linePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val gradientPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val gridPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val lineColor = Color.parseColor("#FF8581")
     private val lineWidth = 4f
     private var transientX = 0f
@@ -38,6 +43,8 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     var isShow: AtomicBoolean = AtomicBoolean(false)
     private var isDestroy: AtomicBoolean = AtomicBoolean(false)
     private var refreshTime = DEFAULT_REFRESH_NANO_TIME
+    private var isDisplayState = AtomicBoolean(false)
+    val pulseArrayList = CopyOnWriteArrayList<Int>()
 
     companion object {
         private const val DEFAULT_REFRESH_NANO_TIME = 10000
@@ -47,6 +54,8 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         private const val SMOOTHNESS = 0.5f
         private const val TRANSIENT_X_OVER = 30f
         private const val X_TRANSIENT = 10f
+        private const val TAG_STRAIGHT = 0
+        private const val TAG_HEART_RATE = 1
     }
 
     constructor(context: Context?) : this(context, null)
@@ -66,6 +75,10 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         gradientPaint.style = Paint.Style.FILL
         gradientPaint.color = Color.TRANSPARENT
         gradientPaint.alpha = 255
+        gridPaint.color = lineColor
+        gridPaint.alpha = 230
+        gridPaint.strokeWidth = 1f
+        gridPaint.style = Paint.Style.STROKE
     }
 
     private fun startTransientX() {
@@ -76,6 +89,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         linePath.addPath(straightLinePath, lastXPos, 0f)
         gradientPath.addPath(gradientStraightLinePath, lastXPos, 0f)
         lastXPos += X_TRANSIENT
+        pulseArrayList.add(TAG_STRAIGHT)
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
@@ -132,7 +146,21 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         try {
             //获得canvas对象
             surfaceCanvas = surfaceHolder.lockCanvas()
-            surfaceCanvas?.drawColor(Color.BLACK)
+            if (isDisplayState.get()) {
+                surfaceCanvas?.drawColor(Color.WHITE)
+                val rowsSize = height / 11f
+                val colsSize = width / 33f
+                for (index in 0..11) {
+                    val y = rowsSize * index
+                    surfaceCanvas?.drawLine(0f, y, width.toFloat(), y, gridPaint)
+                }
+                for (index in 0..33) {
+                    val x = colsSize * index
+                    surfaceCanvas?.drawLine(x, 0f, x, height.toFloat(), gridPaint)
+                }
+            } else {
+                surfaceCanvas?.drawColor(Color.BLACK)
+            }
             if (isShow.get()) {
                 surfaceCanvas?.withTranslation(transientX, 0f) {
                     surfaceCanvas?.drawPath(linePath, linePaint)
@@ -204,11 +232,14 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     fun updateHeartRate() {
-        CoroutineScope(Dispatchers.Default).launch {
-            linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
-            gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
-            lastXPos += heartBeatWidth
-        }
+        pulseArrayList.add(TAG_HEART_RATE)
+        addHeartBeatPath()
+    }
+
+    private fun addHeartBeatPath() {
+        linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
+        gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
+        lastXPos += heartBeatWidth
     }
 
     private fun generateHeartBeatPath(): Path {
@@ -321,4 +352,18 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         }
         return true
     }
+
+    fun updateDisplay(pulseList: List<Int>) {
+        isDisplayState.set(true)
+        pulseArrayList.clear()
+        pulseArrayList.addAll(pulseList)
+        for (tag in pulseArrayList) {
+            if (tag == TAG_HEART_RATE) {
+                addHeartBeatPath()
+            } else {
+                addStraightLine()
+            }
+        }
+    }
+
 }

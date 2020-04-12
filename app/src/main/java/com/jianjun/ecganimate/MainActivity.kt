@@ -24,7 +24,7 @@ class MainActivity : AppCompatActivity() {
 //            }
         }
         findViewById<Button>(R.id.transmit).setOnClickListener {
-            surfaceEcg.updateHeartRate(Random.nextInt(50, 70))
+            surfaceEcg.updateHeartRate()
         }
         findViewById<Button>(R.id.ecg_start).setOnClickListener {
             surfaceEcg.start()
