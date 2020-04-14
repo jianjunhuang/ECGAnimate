@@ -4,21 +4,18 @@ import android.content.Context
 import android.graphics.*
 import android.util.AttributeSet
 import android.view.MotionEvent
-import android.view.SurfaceHolder
-import android.view.SurfaceView
+import android.view.TextureView
 import androidx.core.graphics.withTranslation
 import kotlinx.coroutines.*
 import java.util.concurrent.CopyOnWriteArrayList
-import kotlin.collections.ArrayList
-import kotlin.math.abs
-import java.util.*
+import java.util.concurrent.ExecutorService
+import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.random.Random
 
-class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
+class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
 
-    private var surfaceHolder = holder
     private var surfaceCanvas: Canvas? = null
     private var drawingJob: Job? = null
     private var yStandard = 60f
@@ -38,16 +35,23 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     private val gradientStraightLinePath = Path()
     private val gradientHeartBeatPath = Path()
 
+    /**
+     * 控制 transient 动画
+     */
     var isAnimateStart: AtomicBoolean = AtomicBoolean(false)
+
+    /**
+     * 控制线条显示
+     */
     var isShow: AtomicBoolean = AtomicBoolean(false)
     private var isDestroy: AtomicBoolean = AtomicBoolean(false)
-    private var refreshTime = DEFAULT_REFRESH_NANO_TIME
     private var isDisplayState = AtomicBoolean(false)
     val pulseArrayList = CopyOnWriteArrayList<Int>()
 
+    private var createPathTask: ExecutorService? = Executors.newFixedThreadPool(1)
+
     companion object {
-        private const val DEFAULT_REFRESH_NANO_TIME = 10000
-        private const val TOUCH_REFRESH_NANO_TIME = 1000
+        private const val DEFAULT_REFRESH_NANO_TIME = 10000000
         private val COLOR_GRAPH_FILL =
             intArrayOf(Color.parseColor("#F2E08581"), Color.TRANSPARENT)
         private const val SMOOTHNESS = 0.5f
@@ -55,6 +59,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         private const val X_TRANSIENT = 10f
         private const val TAG_STRAIGHT = 0
         private const val TAG_HEART_RATE = 1
+        private const val TAG = "ECG"
     }
 
     constructor(context: Context?) : this(context, null)
@@ -64,7 +69,6 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         attrs,
         defStyleAttr
     ) {
-        surfaceHolder.addCallback(this)
         isFocusable = true
         keepScreenOn = true
         isFocusableInTouchMode = true
@@ -78,6 +82,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         gridPaint.alpha = 230
         gridPaint.strokeWidth = 1f
         gridPaint.style = Paint.Style.STROKE
+        surfaceTextureListener = this
     }
 
     private fun startTransientX() {
@@ -85,10 +90,14 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     private fun addStraightLine() {
-        linePath.addPath(straightLinePath, lastXPos, 0f)
-        gradientPath.addPath(gradientStraightLinePath, lastXPos, 0f)
-        lastXPos += X_TRANSIENT
-        pulseArrayList.add(TAG_STRAIGHT)
+        createPathTask?.execute {
+            linePath.addPath(straightLinePath, lastXPos, 0f)
+            gradientPath.addPath(gradientStraightLinePath, lastXPos, 0f)
+            lastXPos += X_TRANSIENT
+            if (!isDisplayState.get()) {
+                pulseArrayList.add(TAG_STRAIGHT)
+            }
+        }
     }
 
     override fun onLayout(changed: Boolean, left: Int, top: Int, right: Int, bottom: Int) {
@@ -118,42 +127,19 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         gradientStraightLinePath.lineTo(0f, yStandard)
     }
 
-    override fun surfaceChanged(holder: SurfaceHolder?, format: Int, width: Int, height: Int) {
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder?) {
-        isDestroy.set(true)
-        drawingJob?.cancel()
-    }
-
-    override fun surfaceCreated(holder: SurfaceHolder?) {
-        isDestroy.set(false)
-        drawingJob = CoroutineScope(Dispatchers.Default).launch {
-            while (!isDestroy.get()) {
-                val start = System.nanoTime()
-                shiftX()
-                draw()
-                val stop = System.nanoTime() - start
-                if (stop < refreshTime) {
-                    delay(stop)
-                }
-            }
-        }
-    }
-
     private fun draw() {
         try {
             //获得canvas对象
-            surfaceCanvas = surfaceHolder.lockCanvas()
+            surfaceCanvas = lockCanvas()
             if (isDisplayState.get()) {
                 surfaceCanvas?.drawColor(Color.WHITE)
                 val rowsSize = height / 11f
-                val colsSize = width / 33f
+                val colsSize = width / 66f
                 for (index in 0..11) {
                     val y = rowsSize * index
                     surfaceCanvas?.drawLine(0f, y, width.toFloat(), y, gridPaint)
                 }
-                for (index in 0..33) {
+                for (index in 0..66) {
                     val x = colsSize * index
                     surfaceCanvas?.drawLine(x, 0f, x, height.toFloat(), gridPaint)
                 }
@@ -169,7 +155,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
         } catch (e: Exception) {
         } finally {
             if (surfaceCanvas != null) {
-                surfaceHolder.unlockCanvasAndPost(surfaceCanvas)
+                unlockCanvasAndPost(surfaceCanvas)
             }
         }
     }
@@ -236,27 +222,30 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     private fun addHeartBeatPath() {
-        linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
-        gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
-        lastXPos += heartBeatWidth
+        createPathTask?.execute {
+            linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
+            gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
+            lastXPos += heartBeatWidth
+        }
     }
 
     private fun generateHeartBeatPath(): Path {
         heartBeatPath.reset()
         val points = ArrayList<PointF>()
-        val amp = Random.nextInt(-1, 10) * 10
         val centerY = height / 2f
+        val stand = centerY / 4f
+        val amp = Random.nextInt(-1, 10) * stand * 0.10f
         val p1 = points.add(0f, centerY)
-        val p2 = points.add(p1.x + 40, centerY - 20)
-        val p21 = points.add(p2.x + 30, centerY + 20)
-        val p22 = points.add(p21.x + 10, centerY - 80 - amp)
-        val p3 = points.add(p22.x + 20, centerY - 160 - amp)
-        val p4 = points.add(p3.x + 30, centerY + 80 + amp)
-        val p5 = points.add(p4.x + 30, centerY - 40)
-        val p6 = points.add(p5.x + 30, centerY - 20)
-        val p7 = points.add(p6.x + 16, centerY - 30)
-        val p8 = points.add(p7.x + 16, centerY - 20)
-        val p9 = points.add(p8.x + 22, centerY)
+        val p2 = points.add(p1.x + stand * 0.40f, centerY - stand * 0.20f)
+        val p21 = points.add(p2.x + stand * 0.30f, centerY + stand * 0.20f)
+        val p22 = points.add(p21.x + stand * 0.10f, centerY - stand * 0.80f - amp)
+        val p3 = points.add(p22.x + stand * 0.20f, centerY - stand * 0.160f - amp)
+        val p4 = points.add(p3.x + stand * 0.15f, centerY + stand * 0.80f + amp)
+        val p5 = points.add(p4.x + stand * 0.30f, centerY - stand * 0.40f)
+        val p6 = points.add(p5.x + stand * 0.30f, centerY - stand * 0.20f)
+        val p7 = points.add(p6.x + stand * 0.16f, centerY - stand * 0.30f)
+        val p8 = points.add(p7.x + stand * 0.16f, centerY - stand * 0.20f)
+        val p9 = points.add(p8.x + stand * 0.22f, centerY)
         val controlPoints = calculateControlPoint(points)
         val firstPoint = points.first()
         heartBeatPath.moveTo(firstPoint.x, firstPoint.y)
@@ -310,6 +299,7 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     fun start() {
+        pulseArrayList.clear()
         isAnimateStart.set(true)
         isShow.set(true)
         transientX = 0f
@@ -320,24 +310,32 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
 
     private var dx = 0f
     private var dy = 0f
+
+    private fun restTransient() {
+        if (isDisplayState.get()) {
+            if (transientX > 0f) {
+                transientX = 0f
+            }
+            if (transientX + lastXPos < width) {
+                transientX = width - lastXPos
+            }
+        }
+    }
+
     override fun onTouchEvent(event: MotionEvent?): Boolean {
         when (event?.action) {
             MotionEvent.ACTION_UP -> {
                 if (abs(dx - event.x) < 5 && abs(dy - event.y) < 5) {
                     performClick()
                 }
-                refreshTime = DEFAULT_REFRESH_NANO_TIME
-                if (transientX > 0f) {
-                    transientX = 0f
-                }
-                if (transientX + lastXPos < width) {
-                    transientX = width - lastXPos
-                }
+                restTransient()
+            }
+            MotionEvent.ACTION_CANCEL -> {
+                restTransient()
             }
             MotionEvent.ACTION_DOWN -> {
                 dx = event.x
                 dy = event.y
-                refreshTime = TOUCH_REFRESH_NANO_TIME
             }
             MotionEvent.ACTION_MOVE -> {
                 if (!isAnimateStart.get() && lastXPos >= width) {
@@ -353,17 +351,82 @@ class ECGSurfaceView : SurfaceView, SurfaceHolder.Callback {
     }
 
     fun updateDisplay(pulseList: List<Int>) {
-        isDisplayState.set(true)
-        pause()
+        linePath.reset()
+        gradientPath.reset()
         pulseArrayList.clear()
         pulseArrayList.addAll(pulseList)
+        var pulse = 0
+        transientX = 0f
+        lastXPos = 0f
         for (tag in pulseArrayList) {
             if (tag == TAG_HEART_RATE) {
-                addHeartBeatPath()
-            } else {
-                addStraightLine()
+                pulse++
             }
+            if (pulse > 0) {
+                if (tag == TAG_HEART_RATE) {
+                    addHeartBeatPath()
+                } else {
+                    addStraightLine()
+                }
+            }
+        }
+        createPathTask?.submit {
+            isShow.set(true)
+            isAnimateStart.set(false)
+            isDisplayState.set(true)
         }
     }
 
+    override fun getBitmap(): Bitmap {
+        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val canvas = Canvas(bitmap)
+        canvas.drawColor(Color.WHITE)
+        val rowsSize = height / 11f
+        val colsSize = width / 66f
+        for (index in 0..11) {
+            val y = rowsSize * index
+            canvas.drawLine(0f, y, width.toFloat(), y, gridPaint)
+        }
+        for (index in 0..66) {
+            val x = colsSize * index
+            canvas.drawLine(x, 0f, x, height.toFloat(), gridPaint)
+        }
+        canvas.withTranslation(transientX, 0f) {
+            canvas.drawPath(linePath, linePaint)
+            canvas.drawPath(gradientPath, gradientPaint)
+        }
+        return bitmap
+    }
+
+    override fun onDetachedFromWindow() {
+        super.onDetachedFromWindow()
+        createPathTask?.shutdownNow()
+    }
+
+    override fun onSurfaceTextureSizeChanged(surface: SurfaceTexture?, width: Int, height: Int) {
+    }
+
+    override fun onSurfaceTextureUpdated(surface: SurfaceTexture?) {
+    }
+
+    override fun onSurfaceTextureDestroyed(surface: SurfaceTexture?): Boolean {
+        isDestroy.set(true)
+        drawingJob?.cancel()
+        return false
+    }
+
+    override fun onSurfaceTextureAvailable(surface: SurfaceTexture?, width: Int, height: Int) {
+        isDestroy.set(false)
+        drawingJob = CoroutineScope(Dispatchers.Default).launch {
+            while (!isDestroy.get()) {
+//                val start = System.nanoTime()
+                shiftX()
+                draw()
+//                val stop = System.nanoTime() - start
+//                if (stop < DEFAULT_REFRESH_NANO_TIME) {
+                delay(10)
+//                }
+            }
+        }
+    }
 }

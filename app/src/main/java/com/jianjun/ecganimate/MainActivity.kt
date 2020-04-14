@@ -3,7 +3,6 @@ package com.jianjun.ecganimate
 import android.os.Bundle
 import android.widget.Button
 import androidx.appcompat.app.AppCompatActivity
-import kotlin.random.Random
 
 class MainActivity : AppCompatActivity() {
 
@@ -33,7 +32,8 @@ class MainActivity : AppCompatActivity() {
             surfaceEcg.stop()
         }
         findViewById<Button>(R.id.display).setOnClickListener {
-            surfaceEcg.updateDisplay(surfaceEcg.pulseArrayList)
+            val arry = surfaceEcg.pulseArrayList
+            surfaceEcg.updateDisplay(ArrayList(arry))
         }
     }
 }
