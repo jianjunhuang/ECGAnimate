@@ -13,6 +13,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.math.abs
 import kotlin.random.Random
+import kotlin.random.nextInt
 
 class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
 
@@ -31,9 +32,9 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
     private val linePath = Path()
     private val gradientPath = Path()
     private val straightLinePath = Path()
-    private val heartBeatPath = Path()
     private val gradientStraightLinePath = Path()
-    private val gradientHeartBeatPath = Path()
+
+    private val heartBeatPathList = ArrayList<HeartBeatPaths>()
 
     /**
      * 控制 transient 动画
@@ -104,6 +105,7 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
         super.onLayout(changed, left, top, right, bottom)
         yStandard = height / 2f
         generateGradientPath()
+        prepareHeartBeatPath()
         gradientPaint.shader =
             LinearGradient(
                 0F,
@@ -223,18 +225,23 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
 
     private fun addHeartBeatPath() {
         createPathTask?.execute {
-            linePath.addPath(generateHeartBeatPath(), lastXPos, 0f)
-            gradientPath.addPath(generateGradientHeartRatePath(), lastXPos, 0f)
+            val heartBeatPaths = getHeartBeatPath()
+            linePath.addPath(heartBeatPaths.line, lastXPos, 0f)
+            gradientPath.addPath(heartBeatPaths.gradient, lastXPos, 0f)
             lastXPos += heartBeatWidth
         }
     }
 
-    private fun generateHeartBeatPath(): Path {
-        heartBeatPath.reset()
+    /**
+     * 创建心跳曲线
+     * @param offset 用于控制心率的振幅，越大波峰越高
+     */
+    private fun generateHeartBeatLine(offset: Int): Path {
+        val path = Path()
         val points = ArrayList<PointF>()
         val centerY = height / 2f
         val stand = centerY / 4f
-        val amp = Random.nextInt(-1, 10) * stand * 0.10f
+        val amp = offset * stand * 0.10f
         val p1 = points.add(0f, centerY)
         val p2 = points.add(p1.x + stand * 0.40f, centerY - stand * 0.20f)
         val p21 = points.add(p2.x + stand * 0.30f, centerY + stand * 0.20f)
@@ -248,7 +255,7 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
         val p9 = points.add(p8.x + stand * 0.22f, centerY)
         val controlPoints = calculateControlPoint(points)
         val firstPoint = points.first()
-        heartBeatPath.moveTo(firstPoint.x, firstPoint.y)
+        path.moveTo(firstPoint.x, firstPoint.y)
         for (i in 0 until (points.size * 2) step 2) {
             if (i >= controlPoints.size) {
                 continue
@@ -256,7 +263,7 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
             val leftControlPoint = controlPoints[i]
             val rightControlPoint = controlPoints[i + 1]
             val rightPoint = points[i / 2 + 1]
-            heartBeatPath.cubicTo(
+            path.cubicTo(
                 leftControlPoint.x,
                 leftControlPoint.y,
                 rightControlPoint.x,
@@ -266,18 +273,47 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
             )
         }
         val lastPoint = points.last()
-        heartBeatPath.lineTo(lastPoint.x, lastPoint.y)
+        path.lineTo(lastPoint.x, lastPoint.y)
         heartBeatWidth = lastPoint.x
-        return heartBeatPath
+        return path
     }
 
-    private fun generateGradientHeartRatePath(): Path {
-        gradientHeartBeatPath.reset()
-        gradientHeartBeatPath.addPath(heartBeatPath)
-        gradientHeartBeatPath.lineTo(heartBeatWidth, height.toFloat())
-        gradientHeartBeatPath.lineTo(0f, height.toFloat())
-        gradientHeartBeatPath.lineTo(0f, height / 2f)
-        return gradientHeartBeatPath
+    private fun generateHeartBeatPath(offset: Int): HeartBeatPaths {
+        val line = generateHeartBeatLine(offset)
+        val gradient = generateGradientHeartRatePath(line)
+        return HeartBeatPaths(line, gradient)
+    }
+
+    private fun prepareHeartBeatPath() {
+        if (heartBeatPathList.isNotEmpty()) {
+            return
+        }
+        createPathTask?.execute {
+            heartBeatPathList.add(generateHeartBeatPath(-2))
+            heartBeatPathList.add(generateHeartBeatPath(5))
+            heartBeatPathList.add(generateHeartBeatPath(10))
+        }
+    }
+
+    private fun getHeartBeatPath(): HeartBeatPaths {
+        if (heartBeatPathList.isEmpty()) {
+            prepareHeartBeatPath()
+        }
+        val pos = Random.nextInt(0 until heartBeatPathList.size)
+        return heartBeatPathList[pos]
+    }
+
+    /**
+     * 创建心率的渐变效果
+     */
+    private fun generateGradientHeartRatePath(heartBeatPath: Path): Path {
+        val path = Path()
+        path.reset()
+        path.addPath(heartBeatPath)
+        path.lineTo(heartBeatWidth, height.toFloat())
+        path.lineTo(0f, height.toFloat())
+        path.lineTo(0f, height / 2f)
+        return path
     }
 
     private fun MutableList<PointF>.add(x: Float, y: Float): PointF {
@@ -419,14 +455,16 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
         isDestroy.set(false)
         drawingJob = CoroutineScope(Dispatchers.Default).launch {
             while (!isDestroy.get()) {
-//                val start = System.nanoTime()
+                val start = System.nanoTime()
                 shiftX()
                 draw()
-//                val stop = System.nanoTime() - start
-//                if (stop < DEFAULT_REFRESH_NANO_TIME) {
-                delay(10)
-//                }
+                val stop = System.nanoTime() - start
+                if (stop < DEFAULT_REFRESH_NANO_TIME) {
+                    delay(10)
+                }
             }
         }
     }
+
+    data class HeartBeatPaths(val line: Path, val gradient: Path)
 }
