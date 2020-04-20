@@ -54,7 +54,7 @@ class ECGSurfaceView : TextureView, TextureView.SurfaceTextureListener {
     companion object {
         private const val DEFAULT_REFRESH_NANO_TIME = 10000000
         private val COLOR_GRAPH_FILL =
-            intArrayOf(Color.parseColor("#F2E08581"), Color.TRANSPARENT)
+            intArrayOf(Color.parseColor("#F2E08581"), Color.parseColor("#00E08581"))
         private const val SMOOTHNESS = 0.5f
         private const val TRANSIENT_X_OVER = 30f
         private const val X_TRANSIENT = 10f
